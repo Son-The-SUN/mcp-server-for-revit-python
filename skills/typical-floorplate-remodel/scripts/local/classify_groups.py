@@ -28,11 +28,12 @@ ap = argparse.ArgumentParser()
 ap.add_argument("lv")
 ap.add_argument("--spaces")
 ap.add_argument("--overrides")
-ap.add_argument("--unit-prefix", default="A1-")
+ap.add_argument("--unit-prefix", default="A1-", help="unit space name prefix for this level, e.g. A1-05.")
 args = ap.parse_args()
 
 B = json.load(open("build_%s.json" % args.lv))
 SP = json.load(open("ifc_spaces.json")).get(args.spaces or args.lv, [])
+SP = sorted(SP, key=lambda s: bool(s.get("approx")))      # bounding-box fallbacks are tried last
 OVR = json.load(open(args.overrides)) if args.overrides else {}
 FACADE_LAYERS = ("3 Walls - Ext", "3 Handrails", "3 Walls - Ext Accessories")
 

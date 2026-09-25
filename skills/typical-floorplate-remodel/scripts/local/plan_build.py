@@ -44,17 +44,20 @@ ap = argparse.ArgumentParser()
 ap.add_argument("lv", help="level key used in file names, e.g. L5")
 ap.add_argument("--spaces", help="key in ifc_spaces.json whose unit outlines apply to this level (default: lv)")
 ap.add_argument("--config", help="JSON file overriding DEFAULT_CONFIG keys")
+ap.add_argument("--unit-prefix", help="unit space name prefix for this level, e.g. A1-05. (overrides config)")
 args = ap.parse_args()
 CFG = dict(DEFAULT_CONFIG)
 if args.config:
     CFG.update(json.load(open(args.config)))
+if args.unit_prefix:
+    CFG["unit_prefix"] = args.unit_prefix
 
 LV = args.lv
 D = json.load(open("ifc_%s.json" % LV))
 LZ = D["meta"]["level_z"]
 ROWS = D["rows"]
 try:
-    SPACES = json.load(open("ifc_spaces.json")).get(args.spaces or LV, [])
+    SPACES = sorted(json.load(open("ifc_spaces.json")).get(args.spaces or LV, []), key=lambda s: bool(s.get("approx")))
 except IOError:
     SPACES = []
 UNIT_POLYS = [(s["name"], lp) for s in SPACES for lp in s["loops"] if s["name"] and s["name"].startswith(CFG["unit_prefix"])]
@@ -90,7 +93,14 @@ def on_level(r, lo=-800, hi=200):
 
 
 def outline_points(r):
+    """Section points: the cut at the view's cut plane, or the top face for walls below it."""
     return [p for lp in (r["cut"] or r["top"]) for p in loop_pts(lp)]
+
+
+def extent_points(r):
+    """Points that bound the wall's length: section + top face (a wall with a tall opening is cut only at its
+    jambs, but its top face runs over the lintel)."""
+    return outline_points(r) + [p for lp in r["top"] for p in loop_pts(lp)]
 
 
 def axis_of(r):
@@ -129,6 +139,7 @@ def plan_wall(r):
     if a is None or not W:
         return None
     pts = outline_points(r)
+    xpts = extent_points(r)
     b = r["bb"]
     rec = {"ifc_id": r["id"], "guid": r["IfcGUID"], "layer": r["IfcPresentationLayer"], "name": r["IfcName"],
            "mat": r["IfcMaterial"], "W": W, "base_off": round(b[2] - LZ, 1), "height": round(b[5] - b[2], 1),
@@ -157,7 +168,7 @@ def plan_wall(r):
             while d < -math.pi:
                 d += 2 * math.pi
             return d
-        angs = [rel(math.atan2(p[1] - C[1], p[0] - C[0])) for p in (pts or [p0, p1])]
+        angs = [rel(math.atan2(p[1] - C[1], p[0] - C[0])) for p in (xpts or [p0, p1])]
         lo_a, hi_a = min(angs), max(angs)
         P = lambda t: [C[0] + Rc * math.cos(am + t), C[1] + Rc * math.sin(am + t)]
         rec.update({"kind": "arc", "p0": P(lo_a), "p1": P(hi_a), "pm": P((lo_a + hi_a) / 2.0), "center": C[:2], "radius": Rc})
@@ -167,7 +178,7 @@ def plan_wall(r):
     n = (-d[1], d[0])
     if pts:
         s = [(p[0] - p0[0]) * n[0] + (p[1] - p0[1]) * n[1] for p in pts]
-        t = [(p[0] - p0[0]) * d[0] + (p[1] - p0[1]) * d[1] for p in pts]
+        t = [(p[0] - p0[0]) * d[0] + (p[1] - p0[1]) * d[1] for p in xpts]
         lo, hi = min(s), max(s)
         if abs((hi - lo) - W) <= 30:
             c = (lo + hi) / 2.0
@@ -402,9 +413,14 @@ def plan_window(r, host, free_height):
     ext = exterior_side(wp["pt"], loc["n"])
     if ext:
         wp["exterior"] = ext
+    wp["tw"], wp["th"] = int(round(r["Width"])), int(round(r["Height"]))
+    if host["kind"] != "line":
+        # special case (user rule): windows in curved walls are left as-is for now - listed, not built
+        wp["special"] = "curved host wall"
+        wp["family"] = None
+        return wp
     fams = CFG["window_families"]
     wp["family"] = fams.get(op, fams.get("default"))
-    wp["tw"], wp["th"] = int(round(r["Width"])), int(round(r["Height"]))
     return wp
 
 
@@ -442,14 +458,37 @@ free_height = ext_heights.most_common(1)[0][0] if ext_heights else 3000
 doors = [plan_door(r, host_for(r)) for r in ROWS if r["cat"] == "Doors" and on_level(r, -100, 200)]
 windows = [plan_window(r, host_for(r), free_height) for r in ROWS if r["cat"] == "Windows" and on_level(r, -100, 1500)]
 
+def cover_openings(openings):
+    """Stretch a straight host wall so it covers every opening it hosts (+50 mm each side)."""
+    n = 0
+    for o in openings:
+        h = byid.get(o.get("host_ifc"))
+        if not h or h["kind"] != "line" or not o.get("pt"):
+            continue
+        d, L = unit_dir(h["p0"], h["p1"])
+        t = (o["pt"][0] - h["p0"][0]) * d[0] + (o["pt"][1] - h["p0"][1]) * d[1]
+        half = (o.get("W") or o.get("tw") or 0) / 2.0 + 50
+        lo, hi = min(0.0, t - half), max(L, t + half)
+        if lo < 0 or hi > L:
+            p0 = list(h["p0"])
+            h["p0"] = [p0[0] + d[0] * lo, p0[1] + d[1] * lo]
+            h["p1"] = [p0[0] + d[0] * hi, p0[1] + d[1] * hi]
+            h["notes"].append("extended %.0f..%.0f to cover opening %s" % (lo, hi - L, o["ifc_id"]))
+            n += 1
+    return n
+
+
+covered = cover_openings(doors + windows)
 json.dump({"meta": D["meta"], "walls": walls_kept, "dropped": [w for w in walls if w.get("dropped")], "doors": doors,
            "windows": windows, "screens": screens, "skipped": skipped, "config": CFG},
           open("build_%s.json" % LV, "w"), indent=1)
 print("%s: walls %d (dropped %d, snapped %d, trimmed/split %d) | screens %d | skipped %s | doors %d | windows %d (%d with family)"
       % (LV, len(walls_kept), len(walls) - len(walls_kept), snapped, len(moved), len(screens), skipped, len(doors),
          len(windows), sum(1 for w in windows if w.get("family"))))
+print(" host walls stretched to cover their openings:", covered)
 print(" wall types:", dict(Counter(w["type"] for w in walls_kept)))
 print(" door types:", dict(Counter("%s | %d x %d" % (d.get("family"), d.get("tw", 0), d.get("th", 0)) for d in doors)))
 print(" window sizes:", dict(Counter("%s %d x %d" % (w["op"], w["tw"], w["th"]) for w in windows if "tw" in w)))
+print(" windows left as-is (special):", [(w["ifc_id"], w["special"]) for w in windows if w.get("special")])
 print(" wedges:", [w["ifc_id"] for w in walls if w.get("wedge")], " openings without IFC host:",
       [o["ifc_id"] for o in doors + windows if o.get("host_ifc") is None])

@@ -8,6 +8,8 @@ Runs INSIDE Revit (IronPython 2.7) through execute_revit_code. Set the inputs, t
     LEVEL_ID = 950753                      # host level
     VIEW_ID = 950844                       # host plan view on that level (door plan symbols are read in it)
     STEP = "walls"                         # "walls" | "doors" | "windows" | "remove"
+    # optional: LIMIT = 15                 # create at most this many new elements per call (the tool times out
+    #                                        at 60 s; the manifest records progress, so just call again)
     execfile(r"<repo>\\skills\\typical-floorplate-remodel\\scripts\\revit\\build_revit.py")
 
 Each step is one transaction named "MCP: remodel <level> <step> from IFC", so the user can undo it in one go.
@@ -86,6 +88,7 @@ for k in ("walls", "doors", "windows"):
     MAN.setdefault(k, {})
 MAN.setdefault("notes", [])
 B = json.loads(open(BUILD).read()) if STEP != "remove" else None
+LIMIT = globals().get("LIMIT", 100000)
 
 
 def XYZ(p):
@@ -189,6 +192,21 @@ def find_host(item, walls_by_ifc):
     return None, pt
 
 
+def free_ends_if_filled(host, width_mm):
+    """An opening that (nearly) fills its host wall - e.g. a slider spanning the whole gap between two cross walls -
+    is refused ("Can't cut instance out of Wall") once Revit trims the host at its end joins. Disallow those joins
+    first so the host keeps its full length."""
+    lc = host.Location.Curve if isinstance(host.Location, DB.LocationCurve) else None
+    if lc is None or width_mm * MM + 300 * MM < lc.Length:
+        return False
+    for end in (0, 1):
+        if DB.WallUtils.IsWallJoinAllowedAtEnd(host, end):
+            DB.WallUtils.DisallowWallJoinAtEnd(host, end)
+    doc.Regenerate()
+    MAN["notes"].append("host %d: end joins disallowed so a %d mm opening fits" % (eid(host), width_mm))
+    return True
+
+
 def drop_missing(key):
     for k in list(MAN[key].keys()):
         if doc.GetElement(DB.ElementId(MAN[key][k])) is None:
@@ -204,6 +222,8 @@ if STEP == "walls":
         for w in B["walls"]:
             if str(w["ifc_id"]) in MAN["walls"]:
                 continue
+            if made >= LIMIT:
+                break
             wt = ensure_wall_type(w["type"], w["W"])
             if w["kind"] == "line":
                 crv = DB.Line.CreateBound(XYZ(w["p0"]), XYZ(w["p1"]))
@@ -228,6 +248,8 @@ elif STEP == "doors":
         for d in B["doors"]:
             if str(d["ifc_id"]) in MAN["doors"]:
                 continue
+            if made >= LIMIT:
+                break
             if not d.get("family"):
                 MAN["failures"].append(["door skipped: not planned (no host, no plan symbol)", d["ifc_id"]])
                 continue
@@ -235,6 +257,7 @@ elif STEP == "doors":
             if host is None:
                 MAN["failures"].append(["door skipped: no host wall", d["ifc_id"]])
                 continue
+            free_ends_if_filled(host, max(d["tw"], d.get("W") or 0))
             sym = sized_symbol(DB.BuiltInCategory.OST_Doors, d["family"], d["tw"], d["th"])
             if not sym.IsActive:
                 sym.Activate()
@@ -286,10 +309,13 @@ elif STEP == "windows":
         for w in B.get("windows", []):
             if str(w["ifc_id"]) in MAN["windows"] or not w.get("family"):
                 continue
+            if made >= LIMIT:
+                break
             host, pt = find_host(w, walls_by_ifc)
             if host is None:
                 MAN["failures"].append(["window skipped: no host wall", w["ifc_id"]])
                 continue
+            free_ends_if_filled(host, w["tw"])
             sym = sized_symbol(DB.BuiltInCategory.OST_Windows, w["family"], w["tw"], w["th"])
             if not sym.IsActive:
                 sym.Activate()
@@ -329,6 +355,9 @@ elif STEP == "remove":
     MAN = {"level": nm(level), "walls": {}, "doors": {}, "windows": {}, "types_created": MAN.get("types_created", []),
            "failures": [], "notes": []}
 
+if STEP in ("walls", "doors", "windows"):
+    todo = [x for x in B[STEP] if str(x["ifc_id"]) not in MAN[STEP] and (STEP != "windows" or x.get("family"))]
+    out.append("remaining to create in this step: {}".format(len(todo)))
 f = open(MANIFEST, "w")
 f.write(json.dumps(MAN, indent=1))
 f.close()

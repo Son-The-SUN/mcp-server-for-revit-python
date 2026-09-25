@@ -146,7 +146,9 @@ for e in els:
                             if isinstance(f, DB.PlanarFace) and f.FaceNormal.Z > 0.99 and abs(f.Origin.Z - zcut) < 0.01:
                                 cut.extend(loops_of_face(f))
                                 got = True
-                if not got:
+                # top faces: the projection for elements below the cut plane; for walls always, because a wall
+                # with a tall opening is cut only at its jambs while its top face runs over the lintel
+                if not got or cat == "Walls":
                     for f in o.Faces:
                         if isinstance(f, DB.PlanarFace) and f.FaceNormal.Z > 0.99:
                             top.extend(loops_of_face(f))

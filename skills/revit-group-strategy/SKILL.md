@@ -97,14 +97,18 @@ Everything below runs in `execute_revit_code` (IronPython 2.7). Use one named tr
 
 Grouping happens at the end, possibly in a later session, so record what you create as you go: for each level and group category, the element IDs (and for units, the unit id). A JSON file in the scratchpad works; so does a text parameter such as `Comments` if the user is fine with that. Re-read the model before grouping - the user may have edited it in the meantime - and drop IDs that no longer exist.
 
+A tested implementation lives in the `typical-floorplate-remodel` skill. `scripts/local/group_plan.py` turns a per-element category map plus level bands into names and sharing. `scripts/revit/group_revit.py` does `check` → `joins` → `group` → `place`. Reuse them rather than rewriting.
+
 ### Pre-group checks
 
 For every intended group, before creating it:
 
 - all element IDs exist, are not already in a group (`el.GroupId` is invalid), and are on the same level;
 - every door and window in the set has its host wall in the set (`inst.Host.Id`);
-- no wall end in the set is joined to a wall of another group (`DB.WallUtils.IsWallJoinAllowedAtEnd`, `DB.WallUtils.DisallowWallJoinAtEnd(wall, 0 or 1)`);
+- no wall end in the set is joined to a wall of another group. Find the joins with `wall.Location.get_ElementsAtJoin(end)` and remove them with `DB.WallUtils.DisallowWallJoinAtEnd(wall, end)`. **Repeat until a pass changes nothing:** unjoining one wall's end lets Revit re-join the neighbour at *its* end (first job: 71, then 21, then 1, then 0 ends);
 - the type name you are about to use is unique.
+
+Show the user the plan (names, member counts, what gets shared or replaced) and get a go-ahead before the first `NewGroup`.
 
 ### Create, name and workset one group
 
@@ -136,13 +140,25 @@ except Exception:
 
 ### Repeat a group type on another level
 
-If a category is identical on another level, don't model it twice and group it twice: place another instance of the same type. Copy the instance by the level-to-level height, then check that the copy reports the target level (`GROUP_LEVEL` / "Reference Level") and fix it if needed. If identical loose copies already exist on that level (for example because they were modelled for review), delete those loose copies first and tell the user.
+If a category is identical on another level, don't model it twice and group it twice: place another instance of the same type. If identical loose copies already exist on that level (for example because they were modelled for review), delete them in the same transaction and tell the user.
+
+Copy the instance by the level-to-level height. The copy still references the source level with an offset, so set its reference level to the target level and the offset to 0. Tested on Revit 2025: the group stays in place and its member walls then report the target level as their base constraint, so this is not a mixed-level group.
 
 ```python
 dz = level10.Elevation - level5.Elevation
-new_ids = DB.ElementTransformUtils.CopyElement(doc, grp.Id, DB.XYZ(0, 0, dz))
+new = doc.GetElement(list(DB.ElementTransformUtils.CopyElement(doc, grp.Id, DB.XYZ(0, 0, dz)))[0])
+new.get_Parameter(DB.BuiltInParameter.GROUP_LEVEL).Set(level10.Id)
+new.get_Parameter(DB.BuiltInParameter.GROUP_OFFSET_FROM_LEVEL).Set(0.0)
 ```
+
+### Naming a one-level group
+
+A type used on a single level (a one-off floor the user still wants grouped) is named with that level alone: `A1-Facade_L05`.
+
+### When the model is not workshared
+
+Ask before enabling worksharing. If the user declines, group and name as usual, skip the workset step, and list in the report which workset each group type should go on later.
 
 ### Verify
 
-After grouping, report every group type with its instance count, the levels its instances sit on and its workset, and check `doc.GetWarnings()` for new warnings (duplicate instances, joins across groups, hosted elements without hosts).
+After grouping, report every group type with its instance count, the levels its instances sit on and its workset. Also confirm no remodelled wall/door/window was left ungrouped (`el.GroupId` invalid), and check `doc.GetWarnings()` for new warnings (duplicate instances, joins across groups, hosted elements without hosts).
