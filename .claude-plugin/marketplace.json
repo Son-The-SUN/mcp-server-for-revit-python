@@ -7,7 +7,8 @@
   },
   "plugins": [
     {
-      "name": "revit-mcp",
+      "name": "gsa-mcp-server-for-revit",
+      "displayName": "GSA MCP Server for Revit",
       "source": "./",
       "description": "MCP tools and a usage skill for working with a live Autodesk Revit model through pyRevit Routes"
     }

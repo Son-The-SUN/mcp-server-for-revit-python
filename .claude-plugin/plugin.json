@@ -1,6 +1,6 @@
 {
-  "name": "revit-mcp",
-  "displayName": "Revit MCP",
+  "name": "gsa-mcp-server-for-revit",
+  "displayName": "GSA MCP Server for Revit",
   "description": "Work with a live Autodesk Revit model from Claude: MCP tools to query, view and modify the open model through pyRevit Routes, plus a skill covering Revit units, IronPython 2.7 and safe model edits.",
   "author": {
     "name": "Son Nguyen",
