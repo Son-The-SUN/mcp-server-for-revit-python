@@ -139,15 +139,20 @@ pyRevit will start listening on port `http://localhost:48884/`
 
 ### Manual Installation on a custom directory:
 
-1. Clone the repo in a custom location:
+1. Clone the repo into a folder whose name ends in `.extension`, inside a parent folder of your choice:
     ```bash
-    git clone https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python
+    git clone https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python C:\path\to\parent\revit-mcp-python.extension
     ```
-2. Add `.extension` to the root folder name
-3. In Revit, navigate to the pyRevit tab
-4. Open Settings
-5. Under "Custom Extensions", add the path to the `.extension` folder
-6. Save settings and reload pyRevit (you might need to restart Revit entirely)
+2. In Revit, navigate to the pyRevit tab
+3. Open Settings
+4. Under "Custom Extensions", add the **parent** folder (e.g. `C:\path\to\parent`), not the `.extension` folder itself. pyRevit scans that folder for `*.extension` subfolders.
+5. Save settings and reload pyRevit (you might need to restart Revit entirely)
+
+Steps 2-5 can also be done from a terminal with the pyRevit CLI (then restart Revit):
+
+```bash
+pyrevit extensions paths add "C:\path\to\parent"
+```
 
 ## Testing Your Connection
 
@@ -155,7 +160,7 @@ Once installed, test that the Routes API is working:
 
 1. Open your web browser and go to:
    ```
-   http://localhost:48884/revit_mcp/status/
+   http://127.0.0.1:48884/revit_mcp/status/
    ```
 
 2. If successful, you should see a response like:
@@ -228,11 +233,9 @@ Or for manual installation:
       "command": "uv",
       "args": [
         "run",
-        "--with",
-        "mcp[cli]",
-        "mcp",
-        "run",
-        "/absolute/path/to/main.py"
+        "--directory",
+        "/absolute/path/to/revit-mcp-python.extension",
+        "main.py"
       ]
     }
   }
@@ -253,8 +256,16 @@ For HTTP transport mode, configure Claude Desktop with:
 ### Connecting to Claude Code
 
 ```bash
-claude mcp add -s user "Revit-Connector" -- uv run --with "mcp[cli]" mcp run /absolute/path/to/main.py
+claude mcp add -s user revit -- uv run --directory /absolute/path/to/revit-mcp-python.extension main.py
 ```
+
+`uv run --directory` runs the server with the dependencies pinned in `uv.lock`, so run `uv sync` once in the repo first. Check the registration with `claude mcp get revit`; new Claude Code sessions will then have the Revit tools.
+
+## Troubleshooting
+
+- **`Error: Cannot connect to Revit at http://127.0.0.1:48884`**: the MCP server is running but nothing is listening inside Revit. Check that Revit is open, `Routes Server` is enabled in pyRevit settings, and the extension is loaded (see below). Open `http://127.0.0.1:48884/revit_mcp/status/` in a browser to test the bridge on its own.
+- **The extension is not loading**: pyRevit stores each extension's on/off state in `%APPDATA%\pyRevit\pyRevit_config.ini`, in a section named after the extension folder (e.g. `[revit-mcp-python.extension]`). Make sure it says `disabled = false`, then reload pyRevit.
+- **`localhost` vs `127.0.0.1`**: use `127.0.0.1`. On some machines `localhost` resolves to IPv6 (`::1`) instead of `127.0.0.1`, and the connection to pyRevit Routes fails.
 
 # Creating Your Own Tools
 

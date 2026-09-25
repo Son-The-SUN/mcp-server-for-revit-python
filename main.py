@@ -20,6 +20,12 @@ mcp = FastMCP(
 REVIT_HOST = "127.0.0.1"
 REVIT_PORT = 48884
 BASE_URL = f"http://{REVIT_HOST}:{REVIT_PORT}/revit_mcp"
+CONNECT_ERROR = (
+    f"Error: Cannot connect to Revit at http://{REVIT_HOST}:{REVIT_PORT}. "
+    "Make sure Revit is open, the pyRevit Routes server is enabled "
+    "(pyRevit > Settings > Routes), and the revit-mcp-python extension is loaded. "
+    "Use the launch_revit tool to start Revit."
+)
 
 
 async def revit_get(endpoint: str, ctx: Context = None, **kwargs) -> Union[Dict, str]:
@@ -46,6 +52,8 @@ async def revit_image(endpoint: str, ctx: Context = None) -> Union[Image, str]:
                 return f"Error: {response.status_code} - {response.text}"
     except httpx.TimeoutException:
         return "Error: Image export timed out after 60 seconds."
+    except httpx.ConnectError:
+        return CONNECT_ERROR
     except Exception as e:
         msg = str(e) or type(e).__name__
         return f"Error: {msg}"
@@ -66,6 +74,8 @@ async def _revit_call(method: str, endpoint: str, data: Dict = None, ctx: Contex
             return response.json() if response.status_code == 200 else f"Error: {response.status_code} - {response.text}"
     except httpx.TimeoutException:
         return f"Error: Request timed out after {timeout} seconds. The operation may still be running in Revit."
+    except httpx.ConnectError:
+        return CONNECT_ERROR
     except Exception as e:
         msg = str(e) or type(e).__name__
         return f"Error: {msg}"
