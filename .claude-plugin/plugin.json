@@ -1,0 +1,22 @@
+{
+  "name": "revit-mcp",
+  "displayName": "Revit MCP",
+  "description": "Work with a live Autodesk Revit model from Claude: MCP tools to query, view and modify the open model through pyRevit Routes, plus a skill covering Revit units, IronPython 2.7 and safe model edits.",
+  "author": {
+    "name": "Son Nguyen",
+    "url": "https://github.com/Son-The-SUN"
+  },
+  "homepage": "https://github.com/Son-The-SUN/mcp-server-for-revit-python",
+  "repository": "https://github.com/Son-The-SUN/mcp-server-for-revit-python",
+  "license": "MIT",
+  "keywords": ["revit", "bim", "pyrevit", "autodesk", "aec", "mcp"],
+  "mcpServers": {
+    "revit": {
+      "command": "uv",
+      "args": ["run", "--frozen", "--directory", "${CLAUDE_PLUGIN_ROOT}", "main.py"],
+      "env": {
+        "UV_PROJECT_ENVIRONMENT": "${CLAUDE_PLUGIN_DATA}/venv"
+      }
+    }
+  }
+}

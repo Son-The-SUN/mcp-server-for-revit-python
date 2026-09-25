@@ -109,6 +109,11 @@ def register_code_execution_routes(api):
                         "An object is None/null. Check if elements exist before "
                         "accessing their properties: 'if element:'"
                     )
+                elif error_type == "SyntaxError":
+                    hints.append(
+                        "Code runs under IronPython 2.7. f-strings and other Python 3-only "
+                        "syntax are not supported: use '{}'.format(value) instead."
+                    )
                 elif error_type == "InvalidOperationException":
                     hints.append(
                         "This operation may require a transaction. Wrap model-modifying "

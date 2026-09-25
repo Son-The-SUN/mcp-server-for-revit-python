@@ -17,6 +17,11 @@ def register_code_execution_tools(mcp, revit_get, revit_post, revit_image=None):
         """
         Execute IronPython code directly in Revit context.
 
+        The code runs under IronPython 2.7, not Python 3:
+        - No f-strings (SyntaxError). Use "{}".format(value)
+        - print is a statement: print("a", b) prints a tuple, so print one string
+        - Lengths from the Revit API are in feet, whatever units the project displays
+
         The code has access to:
         - doc: The active Revit document
         - uidoc: The active UIDocument (use for UI operations like switching the active view)

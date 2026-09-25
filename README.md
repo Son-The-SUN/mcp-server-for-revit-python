@@ -20,6 +20,7 @@ It contains:
 - A complete Routes implementation for pyRevit
 - A minimal MCP server script to connect to any MCP-compatible client
 - Several test commands to get you started right away
+- A Claude Code plugin that bundles the MCP server with a Revit skill (see [Connecting to Claude Code](#connecting-to-claude-code-plugin-recommended))
 
 ## Key Architecture Components
 
@@ -253,13 +254,46 @@ For HTTP transport mode, configure Claude Desktop with:
 }
 ```
 
-### Connecting to Claude Code
+### Connecting to Claude Code (plugin, recommended)
+
+This repo is also a Claude Code plugin. Installing it registers the MCP server and adds the `revit` skill. The skill teaches Claude the Revit-specific rules the tool descriptions don't cover: Revit's API works in feet, `execute_revit_code` runs IronPython 2.7, and edits to a live model need care. The skill loads in every project, not only in this repo.
+
+```bash
+claude plugin marketplace add Son-The-SUN/mcp-server-for-revit-python
+claude plugin install revit-mcp@revit-mcp-python
+```
+
+Inside a Claude Code session you can run the same steps as `/plugin marketplace add ...` and `/plugin install ...`. Start a new session afterwards. The tools appear as `plugin:revit-mcp:revit`, and the skill loads on its own when you ask about your Revit model, or explicitly with `/revit-mcp:revit`.
+
+You still need the pyRevit side installed (see [Installing the Extension on Revit](#installing-the-extension-on-revit)) and [uv](README_UV.md) on your `PATH`. The plugin creates its own Python environment the first time the server starts, so that first start can take a few seconds.
+
+- **Working on the repo itself**: add your local clone as the marketplace instead, with `claude plugin marketplace add /path/to/revit-mcp-python.extension`. Claude Code then loads the plugin from the clone in place, so your edits take effect in the next session without reinstalling.
+- **Updates**: the plugin tracks the repo's commits. Run `claude plugin marketplace update revit-mcp-python`, then `claude plugin update revit-mcp@revit-mcp-python`.
+
+### Connecting to Claude Code (MCP server only)
+
+To register just the MCP server, without the skill:
 
 ```bash
 claude mcp add -s user revit -- uv run --directory /absolute/path/to/revit-mcp-python.extension main.py
 ```
 
-`uv run --directory` runs the server with the dependencies pinned in `uv.lock`, so run `uv sync` once in the repo first. Check the registration with `claude mcp get revit`; new Claude Code sessions will then have the Revit tools.
+`uv run --directory` runs the server with the dependencies pinned in `uv.lock`, so run `uv sync` once in the repo first. Check the registration with `claude mcp get revit`; new Claude Code sessions will then have the Revit tools. Don't combine this with the plugin, or Claude sees every tool twice.
+
+### Adding more skills
+
+Skills live in [`skills/`](skills/), one folder per skill:
+
+```
+skills/
+├── revit/                  # foundation: connection, units, IronPython 2.7, safe edits
+│   ├── SKILL.md
+│   └── references/api-recipes.md
+└── <your-skill>/           # e.g. schedules, sheet-setup, model-qa
+    └── SKILL.md
+```
+
+Each `SKILL.md` starts with a `name` and a `description`. The description is what Claude reads to decide when to load the skill, so say what the skill does and when to use it. The plugin picks up new folders automatically, with no manifest change, and each skill is invoked as `/revit-mcp:<name>`. Keep shared rules (units, IronPython, safety) in `revit` rather than repeating them, and point new skills to it. Check your changes with `claude plugin validate .`.
 
 ## Troubleshooting
 
