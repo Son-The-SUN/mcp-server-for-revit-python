@@ -1,6 +1,6 @@
 ---
 name: revit-group-strategy
-description: GroupGSA Revit Execution Plan (REP) rules for Revit model groups on repetitive floor plates - which elements belong in the Facade, Intertenancy + Corridor, Unit and Core groups, how to name group types (<Building>-<Group>_L05-L09), which workset each group goes on, and when to group (only at the very end of a remodel, after the user has approved the ungrouped model). Use this skill whenever you are about to create, name, copy or re-workset Revit groups, when modelling or remodelling a typical floor, tower floor plate or repeated levels, or when the user mentions groups, group naming, typical floors, worksets for groups or the Revit Execution Plan - even if they never say "group".
+description: GroupGSA Revit Execution Plan (REP) rules for Revit model groups on repetitive floor plates - which elements belong in the Facade, Intertenancy + Corridor, Unit, Core and Floor Slab groups, how to name group types (<Building>-<Group>_L05-L09), which workset each group goes on, and when to group (only at the very end of a remodel, after the user has approved the ungrouped model). Use this skill whenever you are about to create, name, copy or re-workset Revit groups, when modelling or remodelling a typical floor, tower floor plate or repeated levels, or when the user mentions groups, group naming, typical floors, floor slabs, worksets for groups or the Revit Execution Plan - even if they never say "group".
 ---
 
 # Revit group strategy (GroupGSA Revit Execution Plan, section 4)
@@ -25,9 +25,9 @@ If the user asks for a change after grouping, don't ungroup. Offer two options: 
 
 - **Repetitive floor plates** (residential towers, typical floors copied level to level): use groups. They keep the file performant, make edits propagate predictably, and let the model be split into separate files later.
 - **Non-repetitive projects**: don't group unless it's strictly necessary. Groups slow the model and complicate daily work.
-- **Only group something that will be placed two or more times** - on several levels, or as repeated identical units on one level. A group used once only adds overhead. When the model does not yet contain all the levels of a typical band (for example only LEVEL 5 exists, but the layout repeats up to LEVEL 9), the group still counts as repeated; say so in your summary.
+- **Only group something that will be placed two or more times** - on several levels, or as repeated identical units on one level. A group used once only adds overhead. When the model does not yet contain all the levels of a typical band (for example only LEVEL 5 exists, but the layout repeats up to LEVEL 9), the group still counts as repeated; say so in your summary. The REP adds "with an exception for the ... group category above". That reads as: the floor-plate categories below may be grouped even on a one-off level. It is ambiguous, so ask; on the first job the user grouped the one-off LEVEL 5.
 
-## The four group categories (REP 4.1)
+## The group categories (REP 4.1)
 
 Each floor plate is split into these categories. Each category is modelled and grouped on its own, per level.
 
@@ -37,8 +37,9 @@ Each floor plate is split into these categories. Each category is modelled and g
 | 2 | **Intertenancy + Corridor** | Party walls between units, corridor walls, and the corridor-side door leaves (unit entry doors) | May vary level to level, but always aligns to the facade module | `12_INTERIOR` |
 | 3 | **Unit** (internal unit walls) | Partitions inside one unit, their doors, floor finishes, joinery, FF&E of that unit | Follows the unit layout; one group type per distinct unit layout | `12_INTERIOR` |
 | 4 | **Core** | Lift, fire stair and services riser/shaft walls, and the doors that belong to the core | Unchanged between levels; structural priority | `12_STRUCTURE` |
+| 5 | **Floor Slab** | The typical concrete floor plate of the level, plus everything that cuts a void or setdown into it: 3D setdowns (setdown void families), cutouts, downpipe penetration holes. **No finish floors** (they go with the Unit) | One per level; identical slabs across a typical band share one type | Not given in the REP: ask (`12_STRUCTURE` is the natural fit) |
 
-The REP text says "five categories" but its table lists four (the fifth row is blank). Anything that fits none of them - stairs, structural columns, slabs, ceilings - stays ungrouped unless the user decides otherwise. Mention what you left out.
+The REP table has separate rows for Intertenancy and Corridor; it allows merging them, as done here. Floor Slab was added in the REP revision of 2026-09-26; before that, slabs stayed ungrouped. Anything that fits none of the categories - stairs, structural columns, ceilings, finish floors - stays ungrouped unless the user decides otherwise. Mention what you left out. The `floor-slab-remodel` skill models the slab.
 
 How to decide which group an element belongs to:
 
@@ -53,10 +54,11 @@ How to decide which group an element belongs to:
 <Building>-<Group Name>_<Start Level>-<End Level>
 ```
 
-REP examples: `G-Unit_L05-L18` (typical residential band), `G-Facade_L05-L18`, `G-Core_L01-Roof`, `G-Intertenancy_L05-L10` (when intertenancy changes mid-tower).
+REP examples: `G-Unit_L05-L18` (typical residential band), `G-Facade_L05-L18`, `G-Core_L01-Roof`, `G-Intertenancy_L05-L10` (when intertenancy changes mid-tower), `G-Floor Slab-L10-L15`.
 
 - **Building**: the building code. Look for it in the project information, the unit numbers (`A1-05.01` means building A1, level 05, unit 01), or the source model. If there is no clear code, ask the user rather than inventing one.
-- **Group Name**: `Facade`, `Intertenancy`, `Core`, or `Unit-<id>` for units, where `<id>` is the unit's stack number or unit type (`Unit-01`, `Unit-2B`). Mirrored units get their own types: `Unit-2B-LH` / `Unit-2B-RH`.
+- **Group Name**: `Facade`, `Intertenancy`, `Core`, `Floor Slab` (with the space), or `Unit-<id>` for units, where `<id>` is the unit's stack number or unit type (`Unit-01`, `Unit-2B`). Mirrored units get their own types: `Unit-2B-LH` / `Unit-2B-RH`.
+- **Floor Slab separator:** the REP's slab example uses a hyphen before the levels (`G-Floor Slab-L10-L15`), while its pattern and every other example use an underscore. Until the user settles it, follow the pattern (`A1-Floor Slab_L10-L15`) and point out the difference. The user's older saved slab groups were named `A1-FLOOR SLAB_LEVEL 5` / `A1-FLOOR SLAB_LEVEL 10-LEVEL20`, before this naming was in the REP.
 - **Level range**: the first and last level of the band this group type is used on, as `L` plus two digits (`L05`); use `GF`, `Roof` and similar for named levels. It describes the typical band the layout repeats over, which can be larger than the levels that exist in the model today - take it from the source drawings or model and state where it came from.
 - If the same category differs between two bands (for example the Level 5 and Level 10 typical floors), each band gets its own type with its own range: `A1-Intertenancy_L05-L09`, `A1-Intertenancy_L10-L28`. If it is identical across both, use one type spanning both bands and place it on every level.
 - Group type names must be unique in the model; check existing group types before naming.

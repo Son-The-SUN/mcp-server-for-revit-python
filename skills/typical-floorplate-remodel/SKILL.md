@@ -111,7 +111,8 @@ Job-specific points:
 - Derive the level range of each group type from `group_bands.py`, not from the view names. On the first job "LEVEL 5 - TYPICAL FLOOR" turned out to be a one-off level, while Facade and Intertenancy were identical on L6-L16 and L18-L24 (L17 a variant).
 - That SSDA-stage IFC had no internal unit partitions, so there were no Unit groups.
 - The building code for names comes from the unit numbers in the IFC spaces (`A1-05.01` → `A1`).
-- Ask whether one-off floors should be grouped anyway (the REP says to group only what's used 2+ times). The user chose to group Level 5 anyway.
+- Ask whether one-off floors should be grouped anyway. The REP says to group only what's used 2+ times, "with an exception for the group categories", which is ambiguous. The user chose to group Level 5 anyway.
+- The floor slab is a sixth REP category (`Floor Slab`, since the REP revision of 2026-09-26): model it with the `floor-slab-remodel` skill and group it on its own.
 - Result on the first job: `A1-Core_L05-L24` (2 instances, L5 + L10, 38 walls + 20 doors each), `A1-Facade_L05`, `A1-Intertenancy_L05`, `A1-Facade_L06-L24`, `A1-Intertenancy_L06-L24`. No worksets (model not workshared; the user declined to enable it).
 - Unit outlines: some IFC spaces are triangle meshes whose element bounding box is garbage (26 × 26 m for one unit). `extract_spaces.py` sections meshes directly and decides level membership from the geometry. Filter units by level code (`--unit-prefix A1-05.`) so a neighbouring level's unit never leaks in.
 
