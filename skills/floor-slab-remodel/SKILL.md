@@ -111,6 +111,16 @@ LEVEL 5 and LEVEL 10: one `CONCRETE 220MM` structural floor each, offset -20, 30
 one stair void; 1060.3 m² each (example 1061.6-1061.7). The two outlines are identical within 1.2 mm, and the
 example matches to 3.8 m² (L10) and 5.4 m² (L5). No warnings on the floors.
 
+## Second job: tower C
+
+`AR-KSCW-SSDA-FP-02.ifc`, LEVEL 6 and LEVEL 18.
+
+- **No example.** There was no example group for this tower, so the tower A convention went in through `--config slab_config.json`: `{"floor_type": "CONCRETE 220MM", "type_source": "CONCRETE 200MM", "offset": -20, "structural": true, "keep_voids": ["stair"]}`. The IFC slab was also 220 with its top at the level.
+- **Result.** L6 1055.7 m², L18 772.7 m² (no south wing), one stair void each, no warnings.
+- **North balconies.** These are separate set-down IFC slabs and stay outside the merged slab. Report them.
+- **Slab band.** Compare each level's IFC `2 Slabs` element (bbox and top-face area) with the modelled one: L5-L13 were identical to L6, L15-L19 to L18. L14 and L20 are 320 thick.
+- **Grouping.** Groups were made with `group_revit.py`, using an explicit `ids` list in `group_plan.json`.
+
 ## Report to the user
 
 - per level: floor id, type, thickness, offset, area; the type created and from what;

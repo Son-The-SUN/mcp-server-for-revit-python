@@ -117,6 +117,16 @@ def ensure_wall_type(name, W):
     return wt
 
 
+def apply_type_params(s, fam, w):
+    """Width-dependent type parameters from the plan's config, e.g. {"type_params": {"WNDW - 1Swing_1Fixed_2Panels":
+    {"Door Panel Width": 0.5}}} = half the type width. Tower C: that family's swing panel stayed 1000 wide from the
+    base type, and a 1050 window then failed ("Base sketch for extrusion is invalid")."""
+    for pname, frac in ((B or {}).get("config", {}).get("type_params", {}).get(fam, {}) or {}).items():
+        p = s.LookupParameter(pname)
+        if p is not None and not p.IsReadOnly and abs(p.AsDouble() - w * frac * MM) > 1e-6:
+            p.Set(w * frac * MM)
+
+
 def sized_symbol(bic, fam, w, h):
     """Type '<w> x <h>' in family `fam`, duplicated from the family's first type when missing."""
     name = "%d x %d" % (w, h)
@@ -125,6 +135,7 @@ def sized_symbol(bic, fam, w, h):
         if s.FamilyName != fam:
             continue
         if nm(s) == name:
+            apply_type_params(s, fam, w)
             return s
         base = base or s
     if base is None:
@@ -144,6 +155,7 @@ def sized_symbol(bic, fam, w, h):
     if ph is None or ph.IsReadOnly:
         raise Exception("cannot set height on %s" % fam)
     ph.Set(h * MM)
+    apply_type_params(s, fam, w)
     MAN["types_created"].append("%s: %s : %s" % ("Door" if bic == DB.BuiltInCategory.OST_Doors else "Window", fam, name))
     return s
 

@@ -11,6 +11,8 @@ Runs INSIDE Revit (IronPython 2.7) through execute_revit_code. Only after the us
 group_plan.json:
   {"levels": {"L5": {"level_id": .., "manifest": "..", "groups": ".."}, "L10": {...}},
    "groups": [{"name": "A1-Core_L05-L24", "source": "L5", "category": "Core", "also_on": ["L10"]}, ...]}
+  A group can list its members explicitly instead: {"name": "C-Floor Slab_L05-L13", "source": "L6",
+  "category": "Floor Slab", "ids": [1766465]} - the floor-slab-remodel slab (plus any setdowns/penetrations).
 
 Steps (each its own named transaction, safe to re-run):
   check  - dry run: member counts per group, level consistency, hosts inside the set, cross-group joins
@@ -53,8 +55,11 @@ for key, cfg in P["levels"].items():
     LV[key] = {"level": doc.GetElement(DB.ElementId(cfg["level_id"])), "cat_of": cat_of}
 
 
-def members(key, category):
-    ids = [DB.ElementId(r) for r, c in LV[key]["cat_of"].items() if c == category]
+def members(key, category, g=None):
+    if g is not None and g.get("ids"):
+        ids = [DB.ElementId(r) for r in g["ids"]]
+    else:
+        ids = [DB.ElementId(r) for r, c in LV[key]["cat_of"].items() if c == category]
     return [i for i in ids if doc.GetElement(i) is not None]
 
 
@@ -68,7 +73,7 @@ def group_type(name):
 out = []
 if STEP == "check":
     for g in P["groups"]:
-        ids = members(g["source"], g["category"])
+        ids = members(g["source"], g["category"], g)
         els = [doc.GetElement(i) for i in ids]
         lvls = set(eid(e.LevelId) for e in els if e.LevelId is not None and eid(e.LevelId) > 0)
         grouped = [eid(e) for e in els if eid(e.GroupId) > 0]
@@ -121,7 +126,7 @@ elif STEP == "group":
         if group_type(g["name"]) is not None:
             out.append("{}: type exists, skipped".format(g["name"]))
             continue
-        ids = members(g["source"], g["category"])
+        ids = members(g["source"], g["category"], g)
         if not ids:
             out.append("{}: no members, skipped".format(g["name"]))
             continue

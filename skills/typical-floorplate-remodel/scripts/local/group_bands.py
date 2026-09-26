@@ -30,6 +30,13 @@ for key in ("walls", "doors", "windows"):
     for k, v in G[key].items():
         if not k.startswith("host-for"):
             catmap[k.split("-")[0]] = v
+def unreliable(cat, h, b):
+    """Wireframe IFC walls (edge curves, few or no solids) get an inflated Revit bounding box, and by a different
+    amount on every level (tower C: a 2800 wall read -1824..4200 on L6 and 1426..7450 on L8), so their twins never
+    match. Such walls (box taller than the IFC height + 300) never decide a band."""
+    return cat == "Walls" and h and (b[5] - b[2]) > h + 300
+
+
 ref = []
 for r in D["rows"]:
     b = r.get("bb")
@@ -37,10 +44,14 @@ for r in D["rows"]:
         continue
     # elements left out of the build (screens, duplicates) still match, but never decide a band
     c = catmap.get(str(r["id"]), "excluded")
+    if unreliable(r["cat"], r["Height"], b):
+        c = "excluded"
     ref.append((c, r["cat"], r["IfcPresentationLayer"], r["Width"], [b[0], b[1], b[2] - lz, b[3], b[4], b[5] - lz]))
 levels = sorted([l for l in A["levels"] if l[0].startswith(args.prefix)], key=lambda l: l[1])
 by_level = defaultdict(list)
 for eid, cat, layer, w, h, sc, b in A["rows"]:
+    if unreliable(cat, h, b):
+        continue
     for name, z in levels:
         if z - 800 <= b[2] <= z + 1500 and b[5] > z + 300:
             by_level[name].append((cat, layer, w, [b[0], b[1], b[2] - z, b[3], b[4], b[5] - z]))

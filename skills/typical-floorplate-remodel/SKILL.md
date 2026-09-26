@@ -36,8 +36,11 @@ execfile(r"<this skill's folder>\scripts\revit\extract_view.py")
 Local scripts read and write the JSON files in the current directory: run them with the scratchpad as the working directory, `python "<skill>/scripts/local/<script>.py" ...`.
 
 0. **Unattended mode on** for the whole build and grouping (see the `revit` skill, "Unattended runs"): `import revit_mcp.unattended as U; U.enable(minutes=180)` once, then wrap each call's `execfile` in `with U.mcp_call():` (or use the `unattended_mode` tool once it is loaded). Otherwise one "Can't keep elements joined" error during `NewGroup` stops the run on a modal dialog. Read `U.summary()` at the end and `U.disable()`.
-1. **Survey.** `get_revit_status`; list levels, plan views (and their view templates), the link instance and its transform, wall/door/window types, and whether the model is workshared. Check the host levels match the IFC storey elevations.
+1. **Survey.** `get_revit_status`; list levels, plan views (and their view templates), the link instance and its transform, wall/door/window types, and whether the model is workshared. Check the host levels match the IFC storey elevations, **and that the storeys match the IFC geometry**. Run `extract_all.py`, then `storey_levels.py` (see "Storeys that don't match the geometry").
 2. **Extract** (Revit): `extract_view.py` once per view → `ifc_<LV>.json` (everything visible in that view: IFC properties, bbox, wall axis, plan section at the cut plane, door/window plan symbols). `extract_spaces.py` → `ifc_spaces.json` (unit/balcony/common-area outlines). `extract_all.py` → `ifc_all.json` (every wall/door/window of the whole IFC, for band detection).
+   - **Draw the view before extracting after any level or view-range change.** Revit refreshes which link elements a plan view shows only when the view is drawn. After moving LEVEL 6 on tower C, the collector kept returning the old set (the floor below) until `get_revit_view` had drawn the view once.
+   - **IFC spaces often exist only on a few floors.** On tower C, spaces existed only on L4/L7 (Level 6 band) and L17 (Level 18 band). Extract them from a twin level of the same band and pass that key to `--spaces`.
+   - `fix_spaces.py <key>` lists a level's spaces. `--drop "NAME@x,y"` drops a space that misleads the unit logic. On tower C the corridor space was named like a unit (`C0-04.02`, the same name as the unit next to it). Drop such a space; don't rename it, because a non-unit space makes its walls Facade.
 3. **Understand** (local): `render_layers.py` draws the plan coloured by IFC layer, `render_spaces.py` overlays unit spaces, `typical_bands.py` shows which levels share each floor's layout per layer (this drives group level ranges), `diff_levels.py` lists what differs between two floors, `wall_stats.py` / `axis_stats.py` summarise wall kinds.
 4. **Plan** (local): `plan_build.py L10 --spaces L6 --unit-prefix A1-06. --config remodel_config.json` → `build_L10.json` (walls, doors, windows, screens, notes). `--spaces` names the space level whose unit outlines apply (Level 10 had none, so its twin L6 was used). `remodel_config.json` holds the job's family choices, e.g. `{"window_families": {"FIXEDCASEMENT": "WNDW - Fixed_1Panel", "TOPHUNG": "WNDW - 1Awning_1Panel", "default": "WNDW - Fixed_1Panel"}}`. Always render the plan with `render_plan.py` over the IFC outlines and look before building.
 5. **Build** (Revit): `build_revit.py` with `STEP = "walls"`, then `"doors"`, then `"windows"`. Each call is one named transaction ("MCP: remodel LEVEL 5 walls from IFC") and records IFC id → Revit id in `manifest_<LV>.json`. `STEP = "remove"` deletes what a manifest created, for a clean rebuild.
@@ -45,6 +48,28 @@ Local scripts read and write the JSON files in the current directory: run them w
    - **After a timeout, never re-run blindly.** Wait for the manifest file to be rewritten (a background `until` loop on its modification time), then read the counts and continue. The next `execute_revit_code` call queues behind the running one, and its reply may be the earlier call's output.
 6. **Verify:** compare counts with the manifest and check `doc.GetWarnings()`. For a clean picture of just the new model, hide the link in the view (`view.HideElements([linkId])` in its own transaction), `get_revit_view`, then unhide it straight away and tell the user you did.
 7. **Review with the user**, fix, then **group** (see Grouping below and `revit-group-strategy`).
+
+## Storeys that don't match the geometry
+
+`storey_levels.py` (after `extract_all.py`) finds each IFC storey's most common wall base. It prints the storey elevation against the geometric one. With `--apply` it rewrites `ifc_all.json` levels (originals kept in `levels_ifc`), so `typical_bands.py` and `group_bands.py` compare the right floors.
+
+On tower C (`AR-KSCW-SSDA-FP-02.ifc`) the export carried tower A's storey list. Tower C's floors sat +1650 (L4-L13), +1750 (L14-L19) and +1850 (L20-L21) above it. The host levels had been copied from the storeys, so the plan views cut through the floor below.
+
+When host levels and geometry disagree, ask. On tower C the user moved the host levels to the geometry (LEVEL 6 33700 → 35350, LEVEL 18 72700 → 74450), so the remodel sits on the IFC in 3D. Then draw each plan view (`get_revit_view`) before extracting.
+
+## Second job: tower C
+
+KSCW tower C, `remodeling-test-towerC.rvt` (workshared), IFC `AR-KSCW-SSDA-FP-02.ifc`, views `LEVEL 6 - TYPICAL` and `LEVEL 18 - TYPICAL`, building code `C` (the user's choice; the IFC units read `C0-`).
+
+- **Levels.** Moved to the IFC geometry (see above). Spaces were taken from L7 and L17, with the corridor space dropped.
+- **Built.** L6: 185 walls, 26 doors, 31 windows. L18: 143 walls, 18 doors, 25 windows. Plus one `CONCRETE 220MM` slab per level (the tower A convention, -20).
+- **Classification overrides.** Riser and cupboard walls next to units → Core, and L18 corridor walls carrying the IFC's external layer → Core. The aim is that identical walls on L6 and L18 get the same group.
+- **Groups.**
+  - Around L6: `C-Facade_L05-L12`, `C-Intertenancy_L05-L13`, `C-Core_L04-L13`, `C-Floor Slab_L05-L13`.
+  - Around L18: `C-Facade_L15-L18`, `C-Intertenancy_L15-L19`, `C-Core_L15-L19`, `C-Floor Slab_L15-L19`.
+  - Nothing is shared between the two floors.
+  - Worksets were skipped at the user's request; the model had only `Workset1`.
+- **Records.** `remodel_records_towerC\` next to the model, so tower A's `remodel_records\` isn't overwritten.
 
 ## Walls - the method that works
 
@@ -62,6 +87,11 @@ The user confirmed the walls built this way were correct.
 - **Resolve collinear overlaps before building.** Where two parallel walls overlap in thickness and length, trim or drop the lower-priority one (glass < generic < concrete, then thinner, then shorter). Otherwise Revit reports "Highlighted walls overlap".
 - **Create:** `DB.Wall.Create(doc, curve, typeId, levelId, height, baseOffset, False, False)`; the API default location line is the wall centreline.
 - **Failure handling:** use a failures preprocessor that records every message, resolves errors with their default resolution (`ResolveFailure`, e.g. "Can't keep elements joined" → unjoin) and deletes failing elements only when there is no resolution. The first run deleted on every error and silently lost 4 walls.
+
+- **Wireframe walls** (tower C): some IFC walls come in as edge curves with few or no solids. Revit's bounding box for them is inflated by up to 1.8 m in z, by a different amount on each level. `plan_build.py` takes their box from the axis and edge curves instead (`tighten_wall_bb`), and uses the edges as the plan outline when there is no solid. `group_bands.py` ignores walls whose box is taller than their IFC height + 300.
+- **Polyline axes** (tower C window surrounds, 400 thick, L/U-shaped): an axis with more than 2 points is planned as one wall per segment (`<ifc id>-s<k>`). Joining its first and last points made rotated walls.
+- **Base window**: `wall_base_max` (config, default 200) is the highest base above the level that still counts as this level. Tower C needed 300 for a curved glass corner wall starting 250 above the slab.
+- **Blockwork is not concrete**: `CONCRETE BLOCK` materials map to generics, never to the `WT5x - CONCRETE` types.
 
 ### IFC "walls" that are not walls
 
@@ -83,7 +113,9 @@ The user confirmed the walls built this way were correct.
 - **Facade windows are window elements hosted in a wall**: real window family instances (Windows category), never curtain walls or openings. The IFC window's host wall is the Revit wall built from its `IfcContainedInHostGUID`. When the IFC window has no host (free-standing glazing between piers), a Generic host wall of the window's depth is built for it, at the typical facade wall height.
 - **Special cases are left as-is for now**: windows in curved walls, and anything else a straight window family can't represent. Don't model them; list them in the report so the user can handle them.
 - **Families by name**: pick from the window families loaded in the model by matching the IFC operation to the family name, e.g. `FIXEDCASEMENT` → a fixed or casement family, `TOPHUNG` → an awning family. Say which you picked. If the model has no window family at all, stop and ask the user (on the first job they loaded theirs).
-- **Types**: `<W> x <H>` in the chosen family, from the IFC `BaseQuantities` width and height. Sill height from the IFC element's bottom relative to the level.
+- **Types**: `<W> x <H>` in the chosen family, from the IFC `BaseQuantities` width and height. Sill height from the IFC element's bottom relative to the level. Windows with no width/height in the IFC are listed, not built.
+- **Width-dependent type parameters**: some families keep a panel width from the base type. For example, `WNDW - 1Swing_1Fixed_2Panels` has `Door Panel Width` 1000, and a 1050 window then fails with "Base sketch for extrusion is invalid". Put the rule in the config: `"type_params": {"<family>": {"Door Panel Width": 0.5}}` (a fraction of W). `build_revit.py` applies it to new and existing `<W> x <H>` types. Copy the ratio from the family's own types.
+- **Tower C choices**: `FIXEDCASEMENT` → `WNDW - Fixed_1Panel`; `SIDEHUNGLEFTHAND`/`RIGHTHAND` (a side-hung panel over a fixed bottom panel) → `WNDW - 1Swing_1Fixed_2Panels`, whose panels sit side by side rather than stacked. `WI_ Casement Window` fits the stacked layout better, but its Height excludes a 580 top panel and it needs extra parameters set.
 - **Conventions**: before trusting a family, place one in a rolled-back test to learn which way `FacingOrientation` points (exterior or interior) and how the opening relates to `Width`/`Height`. Then flip each window so its exterior faces away from the unit spaces.
 
 ## Grouping
@@ -101,7 +133,8 @@ Follow `revit-group-strategy`. Preparing it is local work and can run while the 
 5. `group_plan.py --building A1 --floor "L5:<level id>:LEVEL 5" --floor "L10:<level id>:LEVEL 10"` writes `group_plan.json`: names, source floor, and the floors that share each type.
 6. Show the plan and get the user's go-ahead. Then run `group_revit.py` in this order:
    - `STEP = "check"`: dry run with member counts, one level per group, hosts inside the set, and joins that cross group boundaries.
-   - `STEP = "joins"`: repeats until no cross-group join is left.
+   - `STEP = "joins"`: repeats until no cross-group join is left. **Also repeat it as separate calls until `check` shows 0.** Revit re-forms some joins when the transaction commits, after the passes inside it came back clean. On tower C: [45, 0], then [13, 0] in a second call, then 0.
+   - Slabs (and anything else not in the manifests) go in with an explicit member list in `group_plan.json`: `{"name": "C-Floor Slab_L05-L13", "source": "L6", "category": "Floor Slab", "also_on": [], "ids": [<floor id>]}`. A slab group then reports ~60 members, because the floor's sketch lines count as members.
    - `STEP = "group"`: one call per group with `ONLY = "<name>"`.
    - `STEP = "place"`: shared types. It deletes that floor's loose copies, copies the instance up and sets its reference level, and the member walls follow to the target level.
    - `check` again: expect 0 cross-group joins, 0 ungrouped remodel elements.

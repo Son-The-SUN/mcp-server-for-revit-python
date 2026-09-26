@@ -38,6 +38,9 @@ DEFAULT_CONFIG = {
     # IFC window operation -> window family name; "default" catches the rest. None = don't build windows.
     "window_families": {"default": None},
     "snap_degrees": 0.2,
+    # walls count for this level when their base is -800..wall_base_max mm from it (tower C: a curved glass
+    # corner wall starts 250 above the slab)
+    "wall_base_max": 200,
 }
 
 ap = argparse.ArgumentParser()
@@ -87,14 +90,46 @@ def unit_dir(p0, p1):
     return ((p1[0] - p0[0]) / L, (p1[1] - p0[1]) / L), L
 
 
-def on_level(r, lo=-800, hi=200):
+def on_level(r, lo=-800, hi=None):
+    hi = CFG["wall_base_max"] if hi is None else hi
     b = r.get("bb")
     return b is not None and lo <= b[2] - LZ <= hi and b[5] - LZ > 300
 
 
+def curve_points(r, axis_too=True):
+    pts = []
+    for a in r["axis"]:
+        if axis_too or a.get("style") != "Axis":
+            pts += a.get("pts") or [a["arc"][2], a["arc"][3], a["arc"][4]]
+    return pts
+
+
+def tighten_wall_bb(r):
+    """Some IFC walls come in as wireframes (edge curves, few or no solids), and Revit's bounding box of those is
+    inflated - on tower C by up to 1.8 m in z, so a typical facade wall 0..2800 above the level read as -1824..4200
+    and was dropped as 'not on this level'. Replace the box with the geometry's own extent when it is narrower."""
+    # only walls with an IFC axis (it lies at the wall base): for a solid without one, cut and top faces would miss
+    # the bottom
+    if axis_of(r) is None:
+        return False
+    pts = curve_points(r) + [p for lp in (r["cut"] + r["top"]) for c in lp for p in (c.get("pts") or c["arc"][2:])]
+    b = r.get("bb")
+    if not b:
+        return False
+    g = [min(p[0] for p in pts), min(p[1] for p in pts), min(p[2] for p in pts),
+         max(p[0] for p in pts), max(p[1] for p in pts), max(p[2] for p in pts)]
+    if g[2] - b[2] > 50 or b[5] - g[5] > 50:
+        r["bb_revit"] = b
+        r["bb"] = g
+        return True
+    return False
+
+
 def outline_points(r):
-    """Section points: the cut at the view's cut plane, or the top face for walls below it."""
-    return [p for lp in (r["cut"] or r["top"]) for p in loop_pts(lp)]
+    """Section points: the cut at the view's cut plane, or the top face for walls below it; for wireframe walls
+    (no solid) the wall's own edge curves."""
+    pts = [p for lp in (r["cut"] or r["top"]) for p in loop_pts(lp)]
+    return pts or [p[:2] for p in curve_points(r, axis_too=False)]
 
 
 def extent_points(r):
@@ -128,12 +163,14 @@ def wall_type_for(layer, W, mat):
     wt = CFG["wall_types"]
     if "GLASS" in mat or (layer or "").startswith("3 Handrails"):
         return wt["glass"].format(W=W)
-    if "CONCRETE" in mat and str(W) in wt["concrete"]:
+    # in-situ concrete only: "CONCRETE BLOCK" is blockwork, which has no WT5x equivalent -> generic
+    if "CONCRETE" in mat and "BLOCK" not in mat and str(W) in wt["concrete"]:
         return wt["concrete"][str(W)]
     return wt["generic"].format(W=W)
 
 
-def plan_wall(r):
+def plan_wall(r, seg=None, k=0):
+    """seg: one segment (p0, p1) of a polyline axis - planned as its own wall '<ifc id>-s<k>'."""
     W = r["Width"]
     a = axis_of(r)
     if a is None or not W:
@@ -141,7 +178,7 @@ def plan_wall(r):
     pts = outline_points(r)
     xpts = extent_points(r)
     b = r["bb"]
-    rec = {"ifc_id": r["id"], "guid": r["IfcGUID"], "layer": r["IfcPresentationLayer"], "name": r["IfcName"],
+    rec = {"ifc_id": r["id"] if seg is None else "%d-s%d" % (r["id"], k), "guid": r["IfcGUID"], "layer": r["IfcPresentationLayer"], "name": r["IfcName"],
            "mat": r["IfcMaterial"], "W": W, "base_off": round(b[2] - LZ, 1), "height": round(b[5] - b[2], 1),
            "storey": r["IfcSpatialContainer"], "notes": []}
     rec["type"] = wall_type_for(rec["layer"], W, rec["mat"])
@@ -173,9 +210,17 @@ def plan_wall(r):
         P = lambda t: [C[0] + Rc * math.cos(am + t), C[1] + Rc * math.sin(am + t)]
         rec.update({"kind": "arc", "p0": P(lo_a), "p1": P(hi_a), "pm": P((lo_a + hi_a) / 2.0), "center": C[:2], "radius": Rc})
         return rec
-    p0, p1 = a["pts"][0], a["pts"][-1]
+    p0, p1 = seg or (a["pts"][0], a["pts"][-1])
     d, L = unit_dir(p0, p1)
     n = (-d[1], d[0])
+    if seg is not None:
+        # keep the outline near this segment: within 1.5 W of its line and W past its ends; for the side test
+        # prefer the middle part, away from the legs of the neighbouring segments
+        near = lambda q, m: (-m <= (q[0] - p0[0]) * d[0] + (q[1] - p0[1]) * d[1] <= L + m
+                             and abs((q[0] - p0[0]) * n[0] + (q[1] - p0[1]) * n[1]) <= 1.5 * W)
+        xpts = [q for q in xpts if near(q, W)]
+        pts = [q for q in pts if near(q, -W)] or [q for q in pts if near(q, W)]
+        rec["notes"].append("segment %d of a polyline axis" % k)
     if pts:
         s = [(p[0] - p0[0]) * n[0] + (p[1] - p0[1]) * n[1] for p in pts]
         t = [(p[0] - p0[0]) * d[0] + (p[1] - p0[1]) * d[1] for p in xpts]
@@ -398,6 +443,12 @@ def plan_window(r, host, free_height):
     op = r.get("IfcOperationType") or r.get("OperationType") or r.get("Operation") or ""
     wp = {"ifc_id": r["id"], "guid": r["IfcGUID"], "op": op, "W": r["Width"], "H": r["Height"],
           "sill": round(r["bb"][2] - LZ, 1), "host_ifc": host["ifc_id"] if host else None, "notes": []}
+    if not r["Width"] or not r["Height"]:
+        # tower C had one FIXEDCASEMENT per floor with no BaseQuantities: nothing to size a type from
+        bb = r["bb"]
+        wp.update({"pt": [(bb[0] + bb[3]) / 2.0, (bb[1] + bb[4]) / 2.0], "special": "no width/height in the IFC",
+                   "family": None})
+        return wp
     if host is None:
         free = free_line(r, height=free_height)
         if free is None:
@@ -426,12 +477,23 @@ def plan_window(r, host, free_height):
 
 # ---------------------------------------------------------------- main
 walls, screens, skipped = [], [], []
+tightened = [r["id"] for r in ROWS if r["cat"] == "Walls" and tighten_wall_bb(r)]
 for r in ROWS:
     if r["cat"] != "Walls" or not on_level(r):
         continue
     if axis_of(r) is None:
         screens.append({"ifc_id": r["id"], "layer": r["IfcPresentationLayer"], "W": r["Width"], "H": r["Height"],
                         "nsol": r["nsol"], "bb": r["bb"]})
+        continue
+    a = axis_of(r)
+    apts = a.get("pts") or []
+    if len(apts) > 2:
+        # L/U-shaped IFC walls (tower C window surrounds): one Revit wall per axis segment
+        for k in range(len(apts) - 1):
+            if math.hypot(apts[k + 1][0] - apts[k][0], apts[k + 1][1] - apts[k][1]) < 20:
+                continue
+            w = plan_wall(r, (apts[k], apts[k + 1]), k)
+            (skipped if w is None else walls).append("%d-s%d" % (r["id"], k) if w is None else w)
         continue
     w = plan_wall(r)
     (skipped if w is None else walls).append(r["id"] if w is None else w)
@@ -486,6 +548,7 @@ print("%s: walls %d (dropped %d, snapped %d, trimmed/split %d) | screens %d | sk
       % (LV, len(walls_kept), len(walls) - len(walls_kept), snapped, len(moved), len(screens), skipped, len(doors),
          len(windows), sum(1 for w in windows if w.get("family"))))
 print(" host walls stretched to cover their openings:", covered)
+print(" walls with inflated Revit bbox, box taken from their geometry:", tightened)
 print(" wall types:", dict(Counter(w["type"] for w in walls_kept)))
 print(" door types:", dict(Counter("%s | %d x %d" % (d.get("family"), d.get("tw", 0), d.get("th", 0)) for d in doors)))
 print(" window sizes:", dict(Counter("%s %d x %d" % (w["op"], w["tw"], w["th"]) for w in windows if "tw" in w)))
