@@ -62,7 +62,12 @@ def register_code_execution_routes(api):
             }
 
             try:
-                exec(code_to_execute, namespace)
+                # Mark this as an MCP call so unattended mode (if on) answers its
+                # warnings and dialogs instead of leaving them for a user to click.
+                from . import unattended
+
+                with unattended.mcp_call():
+                    exec(code_to_execute, namespace)
 
                 sys.stdout = old_stdout
                 output = captured_output.getvalue()

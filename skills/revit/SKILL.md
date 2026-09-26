@@ -29,6 +29,7 @@ The dedicated tools are tested, handle differences between Revit versions, and r
 | Place a family instance | `place_family(family_name, type_name, x, y, z, rotation, level_name, properties)` |
 | Color elements by a parameter value | `list_category_parameters` → `color_splash` → `clear_colors` to undo |
 | Open / save / close / sync | `open_document`, `save_document`, `close_document`, `sync_with_central` |
+| Let warnings, errors and dialogs be answered during a long scripted run | `unattended_mode` (see "Unattended runs") |
 | Anything else | `execute_revit_code` |
 
 `get_current_view_elements` can return thousands of rows. Start with the default fields and a modest `limit`, and add `include_location` only when you need coordinates. If the result says `truncated`, `category_counts` still covers every element.
@@ -89,12 +90,37 @@ The model is live and belongs to the user. It may be a real project shared with 
 4. **Leave documents alone unless asked.** Don't save, close or `sync_with_central` on your own initiative: syncing publishes the user's work to their team.
 5. **Undo colors after a visual check.** `color_splash` applies view overrides. Offer `clear_colors` when the user is done looking.
 
+## Unattended runs
+
+A modal warning, error or dialog in Revit blocks every call until someone clicks it: the call times out and the run stalls. For long scripted runs (building floors, grouping, batch edits), switch on **unattended mode** first and off when done:
+
+- MCP tool: `unattended_mode(action="enable", minutes=120)`, then `unattended_mode(action="log")` to see what was answered, and `unattended_mode(action="disable")` at the end.
+- Until the plugin and pyRevit are reloaded with that tool, call the module from `execute_revit_code` and wrap each call's work in `mcp_call()`:
+
+  ```python
+  import revit_mcp.unattended as U
+  U.enable(minutes=120)          # once; stays on across calls until disabled or expired
+  with U.mcp_call():
+      execfile(r"<repo>\skills\typical-floorplate-remodel\scripts\revit\build_revit.py")
+  print(U.summary())             # U.recent(20), U.status(), U.disable()
+  ```
+
+What it does (`revit_mcp/unattended.py`):
+
+- **Warnings** are dismissed. **Errors** get Revit's default resolution (e.g. "Unjoin Elements"). An error with no resolution rolls its transaction back (`on_error="delete"` deletes the failing elements instead).
+- **Groups are never broken.** Several group errors default to "Ungroup" or "Fix Groups...", and the REP forbids ungrouping, so every group error rolls its transaction back. Revit reports these resolutions as type `Default`, so a check on the resolution type alone misses them. Tested: stretching a member of a 2-instance group is rolled back and the group stays intact.
+- **Dialogs**: task dialogs are closed and message boxes answered OK/Yes (known ones get a specific answer, e.g. "Ignore and continue opening" for unresolved references). By default only during MCP calls (`dialog_scope="mcp"`).
+- **Scope**: only transactions named `MCP: ...` or code run through `execute_revit_code`. The user's own edits keep Revit's normal dialogs. The mode switches itself off after `minutes`.
+- Everything answered is logged. Read the log at the end and report what was dismissed or resolved; a dismissed warning is still a warning in the model (`doc.GetWarnings()`).
+
+Scripts with their own `IFailuresPreprocessor` (like `build_revit.py`) handle their failures first. Unattended mode catches what is left, e.g. the "Can't keep elements joined" errors that `NewGroup` raises.
+
 ## When a call fails
 
 | Symptom | Likely cause and what to do |
 |---|---|
 | `Cannot connect to Revit...` | See "Start by confirming the connection" above |
-| Timeout on a simple call | Revit is busy: a modal dialog is open, a command is running, or the user is mid-edit. Ask them to check the Revit window. |
+| Timeout on a simple call | Revit is busy: a modal dialog is open, a command is running, or the user is mid-edit. Ask them to check the Revit window. For scripted runs, turn on unattended mode so dialogs don't block. |
 | `View '<name>' not found` | Get exact names from `list_revit_views`. The error shows only the first 20 names, so don't assume the view is missing. |
 | `Level not found` in `place_family` | Use a name exactly as `list_levels` returns it |
 | `InvalidOperationException` in code | The change needs a transaction, or a UI change is running inside one |

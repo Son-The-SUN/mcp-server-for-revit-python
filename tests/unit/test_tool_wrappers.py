@@ -223,3 +223,36 @@ class TestCodeExecutionTools:
             code="print(1)", ctx=None
         )
         assert "Error during code execution" in result
+
+
+# ---- Unattended mode tool ----
+
+class TestUnattendedTools:
+    @pytest.fixture(autouse=True)
+    def setup(self, mock_mcp, mock_revit_get, mock_revit_post):
+        from tools.unattended_tools import register_unattended_tools
+
+        mock_revit_post.return_value = {"status": "success", "enabled": True}
+        register_unattended_tools(mock_mcp, mock_revit_get, mock_revit_post)
+        self.tools = mock_mcp.tools
+        self.mock_post = mock_revit_post
+
+    async def test_status_default(self):
+        await self.tools["unattended_mode"](ctx=None)
+        self.mock_post.assert_called_once_with("/unattended/", {"action": "status"}, None)
+
+    async def test_enable(self):
+        await self.tools["unattended_mode"](
+            action="enable", minutes=30, on_error="delete",
+            transaction_prefixes=["MCP:"], ctx=None,
+        )
+        self.mock_post.assert_called_once_with(
+            "/unattended/",
+            {"action": "enable", "minutes": 30, "on_error": "delete", "dialogs": True,
+             "dialog_scope": "mcp", "transaction_prefixes": ["MCP:"]},
+            None,
+        )
+
+    async def test_log(self):
+        await self.tools["unattended_mode"](action="log", limit=5, ctx=None)
+        self.mock_post.assert_called_once_with("/unattended/", {"action": "log", "limit": 5}, None)

@@ -45,6 +45,10 @@ def register_routes():
 
         register_document_routes(api)
 
+        from revit_mcp.unattended import register_unattended_routes
+
+        register_unattended_routes(api)
+
         logger.info("All MCP routes registered successfully")
 
     except Exception as e:

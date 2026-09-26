@@ -35,6 +35,7 @@ execfile(r"<this skill's folder>\scripts\revit\extract_view.py")
 
 Local scripts read and write the JSON files in the current directory: run them with the scratchpad as the working directory, `python "<skill>/scripts/local/<script>.py" ...`.
 
+0. **Unattended mode on** for the whole build and grouping (see the `revit` skill, "Unattended runs"): `import revit_mcp.unattended as U; U.enable(minutes=180)` once, then wrap each call's `execfile` in `with U.mcp_call():` (or use the `unattended_mode` tool once it is loaded). Otherwise one "Can't keep elements joined" error during `NewGroup` stops the run on a modal dialog. Read `U.summary()` at the end and `U.disable()`.
 1. **Survey.** `get_revit_status`; list levels, plan views (and their view templates), the link instance and its transform, wall/door/window types, and whether the model is workshared. Check the host levels match the IFC storey elevations.
 2. **Extract** (Revit): `extract_view.py` once per view → `ifc_<LV>.json` (everything visible in that view: IFC properties, bbox, wall axis, plan section at the cut plane, door/window plan symbols). `extract_spaces.py` → `ifc_spaces.json` (unit/balcony/common-area outlines). `extract_all.py` → `ifc_all.json` (every wall/door/window of the whole IFC, for band detection).
 3. **Understand** (local): `render_layers.py` draws the plan coloured by IFC layer, `render_spaces.py` overlays unit spaces, `typical_bands.py` shows which levels share each floor's layout per layer (this drives group level ranges), `diff_levels.py` lists what differs between two floors, `wall_stats.py` / `axis_stats.py` summarise wall kinds.
@@ -127,5 +128,16 @@ End with:
 Then save the record next to the model (the user wanted this on the first job):
 - Run `scripts/revit/export_records.py` (inputs `FLOORS`, `OUT_DIR = <model folder>\remodel_records`). It writes `remodel_records.csv/.json` with one row per IFC element: IFC GUID → Revit ElementId + UniqueId, type, group, or why it was not modelled.
 - Rows whose loose copy was replaced by a shared group instance are re-matched to that instance's members (walls by line, openings by position).
-- Copy `remodel_config.json`, the overrides and `group_plan.json` into `remodel_records/inputs`, and add a short README.
+- Copy `remodel_config.json`, the overrides, `group_plan.json`, and every floor's `build_<LV>.json`, `groups_<LV>.json`, `bands_<LV>.json` and `manifest_<LV>.json` into `remodel_records/inputs`, and add a short README. The scratchpad is temporary; these files are what a rebuild needs.
+- Ask whether to save the model. On the first job the user closed Revit without saving and lost the whole result.
+
+## Rebuilding a lost result
+
+If the model was closed without saving (first job, 2026-09-26), rebuild from the recorded plans rather than re-planning, so every earlier decision is kept:
+
+1. Collect the decisions from the earlier session: its transcript's user messages and `AskUserQuestion` answers, and `remodel_records/inputs`.
+2. Check the link is the same file: sample `ifc_id`s from the build plans against the link document and compare their `IfcGUID`. Level and view ids should also still match.
+3. Restore anything the user had loaded by hand. On the first job the window families were gone. `group_examples\*.rvt` in the project folder turned out to be the user's own reference groups with other families, not the lost result. The same families were in the office library under shorter file names (`WNDW - Fixed_1P.rfa`, `WNDW - 1Awning_1P.rfa` = `WNDW - Fixed_1Panel`, `WNDW - 1Awning_1Panel`, same types). They were loaded and renamed to the earlier names, so `remodel_config.json` and the records still match.
+4. Run `build_revit.py` walls → doors → windows per floor with fresh manifests, point `group_plan.json` at them, then `group_revit.py` check → joins (repeat) → group → place → check, and `export_records.py`.
+5. Compare with the earlier result: counts per level, group member counts, `doc.GetWarnings()`. The rebuild of the first job matched on all counts, and the joins passes (71, 21, 1). It had 4 overlap warnings instead of 2, because `build_revit.py` had since started disallowing host end joins for tight openings (12 walls instead of 2).
 - Key everything by IFC GUID: link element ids change when a revised IFC is re-linked.

@@ -64,7 +64,7 @@ REP examples: `G-Unit_L05-L18` (typical residential band), `G-Facade_L05-L18`, `
 ## Good group practice (REP 4.5)
 
 - **One level per group.** Every element in a group belongs to the same level (walls' base constraint, doors' and windows' level). Mixed-level groups break floor-to-floor copying and schedules.
-- **Never ungroup**, including `Group.UngroupMembers()` through the API. If Revit offers "Fix Group" or "Create New Group Type", accept the new type and then update every instance that was meant to change; leaving some floors on the old type is the most common source of drift.
+- **Never ungroup**, including `Group.UngroupMembers()` through the API, and never accept Revit's "Ungroup" resolution for an error. Unattended mode (`revit` skill) rolls such transactions back rather than ungrouping. If Revit offers "Fix Group" or "Create New Group Type", accept the new type and then update every instance that was meant to change; leaving some floors on the old type is the most common source of drift.
 - **No wall joins across groups.** A unit wall must not run through an intertenancy wall, and an intertenancy wall must not run through a core wall. Model internal walls to the face of the boundary wall, not its centreline, and disallow joins at wall ends that touch another group's walls. If joins appear across groups, the group boundaries are wrong: fix the geometry rather than forcing the join.
 - **No nested groups.**
 - **Avoid attaching detail groups** to model groups.
